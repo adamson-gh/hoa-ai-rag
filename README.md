@@ -1,167 +1,179 @@
-# 🏡 HOA AI — Retrieval-Augmented Assistant for HOA Documents
+# HOA Document AI
 
-A Retrieval-Augmented Generation (RAG) system that answers homeowner questions using HOA governing documents (CC&Rs, Bylaws, Rules) with **evidence-aware reasoning and calibrated confidence**.
+> AI assistant that answers HOA rules questions from governing documents using retrieval-augmented generation (RAG).
 
----
+A retrieval-augmented AI assistant for answering homeowner questions from HOA governing documents such as declarations, bylaws, rules, and policies.
 
-## 🚀 Overview
+This project ingests HOA PDFs, chunks and indexes them with embeddings, retrieves the most relevant excerpts for a user question, and asks an LLM to answer **only from the retrieved evidence**. It also distinguishes between answers that are **explicitly stated** and answers that are **inferred from related rules**.
 
-HOA documents are:
-- long
-- legalistic
-- difficult to search
+## What this project demonstrates
 
-This project builds an AI assistant that:
-- retrieves relevant excerpts from HOA documents
-- answers questions using those excerpts
-- distinguishes between **explicit rules** and **inferred answers**
-- avoids overconfident or hallucinated responses
+- End-to-end RAG pipeline design for messy, real-world documents
+- PDF ingestion, cleaning, chunking, and metadata extraction
+- Vector search with reranking and context trimming
+- Evidence-aware prompting and answer calibration
+- Debug logging for retrieval inspection and iteration
+- Multi-corpus support so different HOAs can be indexed separately
 
----
+## Repository contents
 
-## 🎯 Key Features
+- `app.py` — command-line HOA assistant
+- `ingest_hoa_docs.py` — ingestion and indexing pipeline
+- `prompts/system.txt` — system prompt used for answer behavior
+- `requirements.txt` — Python dependencies
 
-### 🔎 Retrieval-Augmented Answers
-- Uses vector embeddings to search HOA documents
-- Returns top relevant excerpts with scores
+## Architecture
 
-### 🧠 Evidence-Aware Reasoning
-- Differentiates between:
-  - **Explicit rules** (clearly stated)
-  - **Inferred conclusions** (based on related text)
-- Prevents misleading certainty
+- **Ingestion** → PDF text extraction, cleaning, chunking, quality scoring, metadata
+- **Embeddings** → `sentence-transformers` with `all-MiniLM-L6-v2`
+- **Indexing** → FAISS vector index per HOA corpus
+- **Retrieval** → semantic retrieval plus lexical/title/metadata boosts
+- **Reranking** → chunk quality, overlap scoring, and context trimming
+- **Generation** → local Ollama model (`phi4:14b`) with grounded prompting
+- **Calibration** → explicit vs inferred handling and refusal when evidence is weak
 
-### ⚠️ Confidence Calibration
-- Avoids hallucinations
-- Clearly states when:
-  - information is missing
-  - rules are not explicitly defined
+## How it works
 
-### 🧩 Fallback Knowledge Handling
-- Injects known supporting evidence when retrieval misses key context
-- Improves consistency across similar questions
+1. Put HOA source PDFs into `data/<hoa_name>/hoa_docs/`
+2. Run ingestion to extract text, chunk documents, score quality, and build an index
+3. Ask questions against that HOA’s indexed corpus
+4. The assistant retrieves the best excerpts, trims weak context, and answers with uncertainty handling
 
-### 📊 Debug Logging
-- Logs:
-  - queries
-  - retrieved chunks
-  - scores
-  - outputs
-- Enables systematic evaluation and tuning
+## Key design choices
 
----
+### Grounded answers only
+The assistant is instructed to answer only from retrieved excerpts and to avoid inventing rules.
 
-## 🏗️ Architecture
+### Explicit vs inferred handling
+If a rule is only implied by related language, the assistant says so clearly instead of presenting it as an explicit rule.
 
-PDF Documents → Chunking → Embeddings → Vector Search → Retrieval + Boosting + Trimming → LLM + Guardrails → Structured Answer
+### Retrieval tuning over hardcoded Q&A
+The system uses embeddings, metadata, lexical overlap, section titles, and reranking rather than brittle question-answer templates.
 
----
+### Separate corpora per HOA
+Each HOA can have its own source documents, processed chunks, and vector index, which prevents cross-HOA contamination.
 
-## 🧪 Example
+## Example usage
 
-### Question
-Can owners rent out their homes?
+### 1) Create a virtual environment
 
-### Answer (System Output)
-Leasing appears to be permitted based on references to tenants/lessees,
-but no explicit leasing rules were found in the governing text.
-
-What the documents say:
-- Owners may assign certain rights (such as voting rights) to a lessee,
-  indicating leasing is contemplated.
-
-Uncertainty:
-- No dedicated leasing restrictions section was found.
-
----
-
-## 🛠️ Installation
-
-### 1. Clone repo
-git clone <your-repo-url>
-cd ai-hoa
-
-### 2. Create virtual environment
+```powershell
 python -m venv .venv
-.venv\Scripts\activate
+.venv\Scripts\Activate.ps1
+```
 
-### 3. Install dependencies
+### 2) Install dependencies
+
+```powershell
 pip install -r requirements.txt
+```
+
+### 3) Place source documents
+
+Put PDFs here:
+
+```text
+data/arora/hoa_docs/
+data/milestone/hoa_docs/
+```
+
+### 4) Build an index
+
+```powershell
+python .\ingest_hoa_docs.py arora
+python .\ingest_hoa_docs.py milestone
+```
+
+### 5) Run the assistant
+
+```powershell
+python .\app.py arora
+python .\app.py milestone
+```
+
+## Example questions
+
+- `Can I park overnight on the street?`
+- `Do I need approval to change my exterior?`
+- `What happens if I violate the rules?`
+- `Can owners rent out their homes?`
+
+## Example Q&A
+
+### Example 1 — Pet nuisance
+
+**Question:** Is my dog allowed to bark a lot?
+
+**Answer (shortened):**  
+No, not if the barking becomes a nuisance. The retrieved excerpts allow domestic pets but also prohibit nuisances and support enforcement if a violation occurs.
+
+**Why this matters:**  
+This shows the assistant can combine a specific section like **Animals** with broader nuisance language and still answer cautiously.
 
 ---
 
-## ▶️ Usage
+### Example 2 — Leasing
 
-Run the assistant:
-python app.py arora
+**Question:** Can owners rent out their homes?
 
-Example interaction:
-You: do pet owners need to pick up dog waste?
-You: can I lease my home?
-You: what happens if I violate rules?
+**Answer (shortened):**  
+Leasing appears to be contemplated by the governing documents, but the retrieved text does not define a dedicated leasing-rules section or specific leasing restrictions.
 
----
-
-## 📂 Project Structure
-
-ai-hoa/
-├── app.py
-├── data/
-│   └── arora/
-|   |__ milestone/
-├── scripts/
-├── README.md
-├── requirements.txt
+**Why this matters:**  
+This shows the assistant distinguishes between **indirect support** and an **explicit rule**, instead of overstating the answer.
 
 ---
 
-## ⚙️ Technologies Used
+### Example 3 — Missing information
 
-- Python
-- sentence-transformers (MiniLM)
-- FAISS
-- Hugging Face Transformers
-- PDF processing
+**Question:** What should I do if I lose my mailbox key?
 
----
+**Answer (shortened):**  
+I couldn’t find a strong enough match in the HOA documents to answer confidently.
 
-## 🧠 Key Challenges & Solutions
+**Why this matters:**  
+This demonstrates refusal behavior when the evidence is missing, instead of guessing.
 
-Problem: Weak retrieval results  
-Solution: scoring + boosting + trimming
+## Notes
 
-Problem: Overconfident answers  
-Solution: explicit vs inferred reasoning
+- This repo intentionally does **not** include real HOA documents, indexes, logs, or generated chunks.
+- The app expects a local Ollama server for generation.
+- Default model in `app.py`: `phi4:14b`
+- Default embedding model: `all-MiniLM-L6-v2`
 
-Problem: Missing information  
-Solution: fallback evidence + uncertainty messaging
+## Ollama setup
 
-Problem: Debugging AI behavior  
-Solution: structured logging
+Install Ollama, then pull the model used by the app:
 
----
+```powershell
+ollama pull phi4:14b
+```
 
-## 📈 What I Learned
+Start Ollama if needed, then run the app.
+
+## Main dependencies
+
+- `sentence-transformers`
+- `faiss-cpu`
+- `numpy`
+- `pypdf`
+
+## What I learned building this
 
 - Retrieval quality matters more than model choice
-- Document structure is critical
-- AI must distinguish known vs inferred vs unknown
-- Logging is essential
-- Handling missing data is critical
+- Titles and metadata improve legal/document search significantly
+- Good AI systems must distinguish explicit evidence from inference
+- Missing information should be surfaced honestly, not guessed
+- Logs are essential for improving retrieval and answer behavior
 
----
+## Future improvements
 
-## 🚀 Future Improvements
+- Streamlit or web UI
+- Better section-title extraction during ingestion
+- More systematic evaluation set and metrics
+- Optional lexical/BM25 retrieval layer
+- Deployment path for public HOA self-service use
 
-- Web UI
-- Multi-HOA support
-- Better section extraction
-- Confidence metrics
+## License
 
----
-
-## 📌 Summary
-
-This project demonstrates a production-style RAG system focused on:
-
-accuracy, explainability, and reliability.
+MIT
